@@ -1,0 +1,6 @@
+-------------------------------------------------------------
+      Vizunea noastra pentru prototipul creat
+-------------------------------------------------------------
+
+  1.  Proiectul nostru este conceput pentru vizitatorii Timisoarei care vor sa afle despre istoria Timisoarei intr-un mod inedit.
+  2.  De ce are nevoie proiectul nostru este doar o unitate de procesare simpla care sa acceseze un browser local host
