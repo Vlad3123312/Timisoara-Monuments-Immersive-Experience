@@ -1,0 +1,30 @@
+{
+    "SWIPE_MIN_DISTANCE": 0.08,
+    "SWIPE_MIN_SPEED": 0.28,
+    "SWIPE_MAX_OTHER_AXIS": 0.81,
+    "REARM_SPEED": 0.48,
+    "CENTER_ZONE_WIDTH": 0.35,
+    "CENTER_ZONE_HEIGHT": 0.37,
+    "ZOOM_DEADZONE": 0.12,
+    "ZOOM_STEP": 0.16,
+    "ZOOM_MAX_HAND_SPEED": 0.43,
+    "_stats": {
+        "persoane_inregistrate": [
+            "p1",
+            "p2",
+            "p3"
+        ],
+        "total_swipes_analizate": 85,
+        "swipes_pe_directie": {
+            "dreapta": 23,
+            "stanga": 23,
+            "sus": 18,
+            "jos": 21
+        },
+        "viteza_medie_globala": 0.49,
+        "zoom_gesturi_analizate": 73,
+        "zoom_amplitudine_mediana": 0.31,
+        "distanta_medie_globala": 0.17,
+        "avertismente": []
+    }
+}

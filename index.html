@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teatrul Național Timișoara – Expoziție interactivă</title>
+<style>
+  /* Culorile si dimensiunile comune; unele (--zoom, --fit, --tl-h, --tl-ms) sunt modificate din JavaScript */
+  :root {
+    --velvet: #1b1316;
+    --brass: #c8a35a;
+    --ivory: #efe6d4;
+    --ivory-dim: #a89d8b;
+    --zoom: 1;
+    --pip-w: clamp(180px, 18vw, 300px);   /* lățimea camerei – folosită și pentru a ține textul departe de ea */
+    --fit: cover;                          /* se setează din CONFIG.FIT */
+    --tl-h: 8rem;                          /* înălțimea timeline-ului, măsurată automat */
+    --tl-ms: 6000ms;       /* se ajustează automat la durata videoului de tranziție */
+  }
+  /* Reset general + pagina pe tot ecranul, fara scroll (e pentru un ecran de expozitie) */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: var(--velvet); color: var(--ivory); }
+  body {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    cursor: none; user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  }
+  #app { position: relative; height: 100%; }
+
+  /* ---------- Zona centrală ---------- */
+  #stage { position: absolute; inset: 0; overflow: hidden; background: #000; }
+  /* .zoomer contine toate imaginile/videourile; se mareste cu scale() la zoom_in */
+  .zoomer {
+    position: absolute; inset: 0;
+    transform: scale(var(--zoom)); transform-origin: center;
+    transition: transform .5s ease;
+  }
+  /* Fiecare imagine/video e un strat; doar cel cu clasa .show e vizibil (fade prin opacity) */
+  .layer { position: absolute; inset: 0; opacity: 0; transition: opacity .5s ease; background: #000; }
+  .layer.show { opacity: 1; }
+  .layer img, .layer video { width: 100%; height: 100%; object-fit: var(--fit); object-position: center; display: block; }
+  /* Daca fisierul lipseste, in locul lui apare un fundal cu numele fisierului */
+  .layer.hold.missing { background: linear-gradient(160deg, #4a3a28, #1d1612); }
+  .layer.missing img, .layer.missing video { display: none; }
+  .layer.hold.missing::after {
+    content: "Lipsește: " attr(data-label);
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: var(--ivory-dim); font-size: 1.1rem;
+  }
+  /* Stratul videoului de tranzitie sta deasupra imaginilor */
+  .layer.trans { background: #000; z-index: 3; }
+
+  /* Textul epocii (titlu + descriere), afisat la swipe jos si ascuns la swipe sus */
+  .caption {
+    position: absolute; left: 0; right: 0; bottom: calc(var(--tl-h) - 2rem); z-index: 4;
+    /* dreapta e rezervată pentru coloana camerei, ca textul să nu o atingă niciodată */
+    padding: 8rem calc(var(--pip-w) + 4rem) 1.2rem 4rem;
+    pointer-events: none; color: #fff;
+    background: linear-gradient(to top, rgba(10,6,8,.95) 0%, rgba(10,6,8,.82) 55%, rgba(10,6,8,0) 100%);
+    transition: opacity .5s ease;
+  }
+  .caption.hidden { opacity: 0; }
+  .cap-inner { max-width: 62rem; text-shadow: 0 2px 10px rgba(0,0,0,.6); }
+  .cap-year { display: block; color: #fff; opacity: .85; text-transform: uppercase; letter-spacing: .28em;
+              font-size: clamp(.9rem, 1.2vw, 1.15rem); }
+  .cap-year::after { content: ""; display: block; width: 3.5rem; height: 2px; margin: .7rem 0 .9rem; background: var(--brass); }
+  .caption h2 { color: #fff; font-weight: 500; line-height: 1.15; text-wrap: balance;
+                font-size: clamp(1.6rem, min(2.8vw, 4.6vh), 2.9rem); }
+  .caption p { color: #fff; margin-top: 1rem; max-width: 68ch; line-height: 1.6; text-wrap: pretty;
+               font-size: clamp(.95rem, min(1.35vw, 2.3vh), 1.3rem); }
+
+  /* ---------- Picture-in-Picture ---------- */
+  #pip {
+    position: absolute; top: 1.5rem; right: 1.5rem; z-index: 10;
+    width: var(--pip-w); aspect-ratio: 4 / 3;
+    border-radius: 18px; overflow: hidden;
+    background: rgba(27,19,22,.45); border: 1px solid rgba(239,230,212,.25);
+    box-shadow: 0 10px 30px rgba(0,0,0,.45);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  /* Mesajul "Fara semnal" apare cand clasa .offline e pe #pip; punctul din colt arata starea WebSocket */
+  #pip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #pip .nosignal { position: absolute; inset: 0; display: none; place-items: center; text-align: center;
+                   padding: 1rem; font-size: .9rem; color: var(--ivory-dim); background: rgba(27,19,22,.7); }
+  #pip.offline .nosignal { display: grid; }
+  #ws-dot { position: absolute; top: .6rem; left: .6rem; width: 9px; height: 9px; border-radius: 50%;
+            background: #a64b4b; box-shadow: 0 0 0 2px rgba(0,0,0,.35); }
+  #ws-dot.on { background: #6fae7c; }
+
+  /* ---------- Timeline ---------- */
+  #timeline { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; padding: 3rem 6vw 1.6rem;
+              background: linear-gradient(to top, rgba(14,9,11,.95) 0%, rgba(14,9,11,.85) 55%, rgba(14,9,11,0) 100%); }
+  /* Pista: o coloana pentru fiecare epoca; --n (numarul de epoci) se seteaza din JavaScript */
+  .track { position: relative; display: grid; grid-template-columns: repeat(var(--n), 1fr); }
+  .line { position: absolute; top: 9px; height: 2px; background: rgba(239,230,212,.18);
+          left: calc(50% / var(--n)); width: calc(100% - 100% / var(--n)); }
+  /* Bara aurie care se umple pe durata videoului de tranzitie */
+  .line .fill { height: 100%; width: 100%; background: var(--brass); transform-origin: left; transform: scaleX(0);
+                transition: transform var(--tl-ms) linear; }
+  /* Un punct + an pe timeline; starile: .passed (trecut) si .active (curent) */
+  .tick { position: relative; z-index: 1; background: none; border: 0; color: var(--ivory-dim); font: inherit;
+          cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: .7rem;
+          transition: color .5s ease; }
+  .tick .dot { width: 20px; height: 20px; border-radius: 50%; background: var(--velvet);
+               border: 2px solid rgba(239,230,212,.35);
+               transition: background .5s ease, border-color .5s ease, box-shadow .5s ease, transform .5s ease; }
+  .tick .year { font-size: 1.3rem; letter-spacing: .04em; transition: font-size .5s ease, color .5s ease; }
+  .tick.passed .dot { border-color: var(--brass); }
+  .tick.active { color: var(--ivory); }
+  .tick.active .dot { background: var(--brass); border-color: var(--brass); transform: scale(1.25);
+                      box-shadow: 0 0 0 6px rgba(200,163,90,.22); }
+  .tick.active .year { font-size: 2rem; color: var(--brass); }
+
+  /* ---------- Buton muzică (stânga sus, transparent) ---------- */
+  #music-btn {
+    position: absolute; top: 1.5rem; left: 1.5rem; z-index: 12;
+    width: 52px; height: 52px; display: grid; place-items: center; padding: 0;
+    border-radius: 50%; background: transparent; border: 1px solid rgba(239,230,212,.35);
+    color: #fff; opacity: .55; cursor: pointer;      /* body are cursor:none; aici îl arătăm */
+    transition: opacity .3s ease, background .3s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #music-btn:hover, #music-btn:focus-visible { opacity: 1; background: rgba(0,0,0,.25); }
+  #music-btn svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8;
+                   stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 3px rgba(0,0,0,.6)); }
+  #music-btn .waves { display: none; }
+  #music-btn.playing .waves { display: inline; }
+  #music-btn.playing .slash { display: none; }
+  #music-btn.na { opacity: .25; }                    /* fișierul audio lipsește */
+
+  /* Contur vizibil pentru navigarea de la tastatura */
+  :focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
+  /* Pentru cei care au dezactivat animatiile in sistem */
+  @media (prefers-reduced-motion: reduce) { .zoomer, .layer, .tick, .tick * { transition-duration: 1ms !important; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <main id="stage" aria-live="polite">
+    <div class="zoomer" id="zoomer"></div>
+    <div class="caption hidden" id="caption"><div class="cap-inner"><span class="cap-year"></span><h2></h2><p></p></div></div>
+    <aside id="pip" class="offline" aria-label="Cameră în direct">
+      <span id="ws-dot" title="Stare WebSocket"></span>
+      <img id="pip-img" alt="Live Feed"><!-- src-ul se seteaza din JavaScript (loadCamera) -->
+      <div class="nosignal">Fără semnal de la cameră</div>
+    </aside>
+  </main>
+  <nav id="timeline" aria-label="Cronologie"><div class="track" id="track"></div></nav>
+  <button type="button" id="music-btn" aria-label="Pornește muzica" aria-pressed="false" title="Muzică (M)">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/>
+      <g class="waves"><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a8 8 0 0 1 0 11"/></g>
+      <path class="slash" d="M16 9.5l5 5M21 9.5l-5 5"/>
+    </svg>
+  </button>
+</div>
+
+<script>
+/* =====================================================================
+   CONFIGURARE – editați doar acest bloc
+
+   Fiecare epocă are:
+     media   – ce se vede cât timp stă pe epoca respectivă (imagine sau video în buclă)
+     toNext  – videoul de ~6 s de la această epocă la URMĂTOAREA (swipe_right)
+     toPrev  – videoul de ~6 s de la această epocă la CEA DINAINTE (swipe_left)
+
+   Pentru a EXTINDE timeline-ul: copiați un bloc { ... } în ERAS și puneți-l
+   în ordine cronologică. Bara de timp se redimensionează singură.
+   Prima epocă nu are toPrev, ultima nu are toNext.
+   ===================================================================== */
+const CONFIG = {
+  WS_URL: "ws://localhost:8000/ws",
+  CAMERA_URL: "http://localhost:8001/stream",
+  CAMERA_RETRY_MS: 5000,
+  FIT: "cover",      // "cover" = umple tot ecranul (recomandat); "contain" = tot cadrul se vede, dar cu margini negre
+  MUSIC_URL: "opera/Opera Overtures & Instrumental Arias.mp3",   // fișierul audio (se repetă în buclă); puneți calea către melodia dorită
+  MUSIC_VOLUME: 1,              // 0 = mut, 1 = maxim
+  START_INDEX: -1,   // epoca de start: -1 = ultima (Prezent), 0 = prima, 1, 2 ...
+  ERAS: [
+    { year: "1874", title: "Nașterea unui palat al artelor și al mondenității imperiale", text: "În timp ce schelele acoperă clădirea proiectată de faimoșii arhitecți vienezi Fellner și Helmer, Timișoara se pregătește să primească mult mai mult decât un simplu teatru. Sub același acoperiș prind contur o sală de spectacole somptuoasă de 900 de locuri, luxosul hotel Kronprinz Rudolf, o sală de bal strălucitoare (Redoute), un club de cărți și chiar o popicărie. Clădirea este gândită ca inima vibrantă a vieții sociale din Cetate, unde aristocrația și burghezia urmau să se întâlnească nu doar pentru muzică, ci pentru întregul spectacol al vieții urbane.",
+      media:  { type: "image", src: "opera/1874.jpg" },
+      toNext: "opera/1874-1895.mp4" },
+
+    { year: "1895", title: "Negocieri diplomatice pentru elita operei europene", text: "Timișoara nu era o simplă oprire de provincie, ci un punct strategic pe harta lirică a Imperiului Austro-Ungar. În acest an, conducerea teatrului din Bratislava trimite o delegație oficială la Timișoara pentru a renegocia acordurile stagiunilor de operă germană. În culise se duc tratative intense pentru a garanta că publicul timișorean primește cele mai bune voci și producții ale momentului, confirmând statutul de metropolă culturală a orașului.",
+      media:  { type: "image", src: "opera/1895.jpg" },
+      toNext: "opera/1895-1896.mp4",
+      toPrev: "opera/1895-1874.mp4" },
+
+    { year: "1896", title: "Premiere europene în anul marilor serbări ale Mileniului", text: "Pe fondul efervescenței aduse de Expoziția Milenară, scena teatrului timișorean devine locul unor descoperiri muzicale fascinante. Chiar dacă numărul reprezentațiilor de operă a fost mai restrâns, publicul are privilegiul de a asista la două premiere absolute pentru oraș: capodopera plină de umor Mireasa vândută de Bedřich Smetana și rafinata operă franceză Mignon de Ambroise Thomas. Cortina se ridică peste o lume care își trăiește cu pasiune modernitatea culturală.",
+      media:  { type: "image", src: "opera/1896.jpg" },
+      toNext: "opera/1896-1898.mp4",
+      toPrev: "opera/1896-1895.mp4" },
+
+    { year: "1898", title: "Un tânăr geniu la pupitrul orchestrei din Timișoara", text: "În fosa orchestrei din Timișoara urcă un tânăr dirijor de doar 22 de ani, pe nume Bruno Walter, care va deveni ulterior una dintre cele mai mari legende ale muzicii clasice mondiale. Sub bagheta sa, calitatea spectacolelor lirice explodează, uimind criticii și spectatorii deopotrivă. Vizitatorii care pășesc astăzi în sală se află în același spațiu acustic în care unul dintre titanii secolului XX își șlefuia talentul la început de drum.",
+      media:  { type: "image", src: "opera/1898.jpg" },
+      toNext: "opera/1898-1900.mp4",
+      toPrev: "opera/1898-1896.mp4" },
+
+    { year: "1900", title: "La cumpăna secolelor: operă, operetă și seri de gală", text: "Odată cu intrarea în noul secol, scena este cucerită de energia companiei conduse de directorul Lajos Makó, ajuns la Timișoara printr-un inedit „schimb de teritorii” teatrale cu rivalul său, Ignác Krecsányi. Programul devine un carusel electrizant de operă serioasă, operetă spumoasă și concerte de gală. Publicul vine la teatru ca la o mare sărbătoare a secolului XX, într-o atmosferă plină de optimism și eleganță Belle Époque.",
+      media:  { type: "image", src: "opera/1900.jpg" },
+      toNext: "opera/1900-1902.mp4",
+      toPrev: "opera/1900-1898.mp4" },
+
+    { year: "1902", title: "Întoarcerea legendarului director Ignác Krecsányi", text: "După doi ani agitați, la cârma teatrului revine Ignác Krecsányi, un vizionar care a transformat instituția din Timișoara în cel mai important teatru din afara Budapestei. Revenirea sa aduce stabilitate, montări spectaculoase și o disciplină artistică de fier. Sub îndrumarea lui, clădirea își recapătă aura de templu al artei unde fiecare seară de premieră este un eveniment monden de neratat.",
+      media:  { type: "image", src: "opera/1902.jpg" },
+      toNext: "opera/1902-1906.mp4",
+      toPrev: "opera/1902-1900.mp4" },
+
+    { year: "1906", title: "Palatul Culturii devine epicentrul divertismentului modern", text: "Complexul care reunește Teatrul și Hotelul Kronprinz Rudolf pulsează de viață de dimineața până târziu în noapte. Pe lângă spectacolele clasice, sala Redoute găzduiește baluri fastuoase, reuniuni ale asociațiilor moderne și primele demonstrații de divertisment tehnic ale epocii. Clădirea nu mai este doar un loc al artei înalte, ci laboratorul în care timișorenii experimentează noutățile secolului abia început.",
+      media:  { type: "image", src: "opera/1906.jpg" },
+      toNext: "opera/1906-1908.mp4",
+      toPrev: "opera/1906-1902.mp4" },
+
+    { year: "1908", title: "Teatrul înfruntă noua magie a cinematografului", text: "În vara anului 1908, în Timișoara se deschide primul cinematograf permanent, iar publicul este fascinat de imaginile în mișcare. Pentru a-și păstra spectatorii fideli, conducerea teatrului și a sălii Redoute răspunde provocării cu o strategie strălucită: aduce pe scenă staruri celebre din Viena și Budapesta. Începe o competiție fascinantă între magia proiecțiilor pe ecran și emoția vie, irrepetabilă, a vocii umane și a orchestrei live.",
+      media:  { type: "image", src: "opera/1908.jpg" },
+      toNext: "opera/1908-1910.mp4",
+      toPrev: "opera/1908-1906.mp4" },
+
+    { year: "1910", title: "Apogeul acustic și strălucirea galelor din Banat", text: "În vara lui 1910, sala mare a Teatrului Orășenesc este arhiplină pentru o serie de reprezentații extraordinare care reunesc întreaga elită a Banatului. Evenimentele confirmă reputația extraordinară a acusticii sălii și transformă clădirea într-un magnet pentru marii artiști aflați în turneu european. Fiecare lojă este ocupată, iar aplauzele răsună într-un oraș aflat la apogeul prosperității sale de dinainte de război.",
+      media:  { type: "image", src: "opera/1910.jpg" },
+      toNext: "opera/1910-1912.mp4",
+      toPrev: "opera/1910-1908.mp4" },
+
+    { year: "1912", title: "Ultima mare înflorire artistică înainte de furtuna războiului", text: "Sub bagheta experimentatului Ignác Krecsányi și cu ajutorul trupelor invitate, teatrul trăiește ultimele sale sezoane de strălucire imperială neumbrită. Pe această scenă se pun bazele unor noi inițiative lirice și teatrale regionale, iar publicul se bucură de o ofertă culturală bogată, fără să bănuiască faptul că peste doar doi ani Europa va intra în Primul Război Mondial. Este epoca de aur a eleganței antebelice.",
+      media:  { type: "image", src: "opera/1912.jpg" },
+      toNext: "opera/1912-1914.mp4",
+      toPrev: "opera/1912-1910.mp4" },
+
+    { year: "1914", title: "Retragerea unei legende și cortina trasă peste o epocă", text: "În aprilie 1914, chiar înainte ca lumea să se schimbe definitiv, legendarul director Ignác Krecsányi își ia rămas-bun de la scena timișoreană, lăsând în urmă o moștenire uriașă și un volum de memorii teatrale. Ștafeta este predată lui János Komjáthy pentru stagiunea 1914–1915, într-o atmosferă încărcată de emoție. Odată cu plecarea lui Krecsányi și izbucnirea războiului câteva luni mai târziu, se încheie un capitol irepetabil din istoria clădirii.",
+      media:  { type: "image", src: "opera/1914.jpg" },
+      toNext: "opera/1914-1919.mp4",
+      toPrev: "opera/1914-1912.mp4" },
+
+    { year: "1919", title: "Primul spectacol în limba română răsună pe scenă", text: "La 7 august 1919, la numai patru zile după instaurarea administrației românești în Timișoara, istoria clădirii intră într-o nouă eră. Pe scena care până atunci găzduise spectacole în germană și maghiară urcă o trupă de artiști sosiți de la Craiova, oferind primul spectacol în limba română din istoria edificiului. Sala devine simbolul unei noi realități culturale și al deschiderii spre un nou public.",
+      media:  { type: "image", src: "opera/1919.jpg" },
+      toNext: "opera/1919-1934.mp4",
+      toPrev: "opera/1919-1914.mp4" },
+
+    { year: "1934", title: "O nouă față pentru eternitate: celebrul Arc de Triumf", text: "După incendiul devastator din 1920, arhitectul Duiliu Marcu (creatorul Palatului Victoria din București) desenează în 1934 o transformare radicală care va schimba pentru totdeauna silueta orașului. Vechea fațadă renascentistă este înlocuită cu monumentalul portal în stil neobizantin și Art Deco, conceput ca un veritabil arc de triumf alb. Clădirea capătă astfel chipul iconic pe care îl admirăm astăzi în Piața Victoriei.",
+      media:  { type: "image", src: "opera/1934.jpg" },
+      toNext: "opera/1934-1989.mp4",
+      toPrev: "opera/1934-1919.mp4" },
+
+    { year: "1989", title: "Balconul libertății: Timișoara devine primul oraș liber", text: "La 20 decembrie 1989, clădirea Operei își depășește menirea artistică și devine altarul libertății României. În interior se constituie Frontul Democratic Român, iar din celebrul balcon al Operei, în fața a zeci de mii de oameni adunați în piață, Timișoara este proclamată primul oraș liber de comunism din țară. Zidurile care au ascultat arii de operă timp de peste un secol devin martorii strigătului de libertate al unei întregi națiuni.",
+      media:  { type: "image", src: "opera/1989.jpg" },
+      toNext: "opera/1989-2026.mp4",
+      toPrev: "opera/1989-1934.mp4" },
+
+    { year: "Prezent", title: "Templul modern al artelor și inima vibrantă a Timișoarei", text: "Astăzi, clădirea emblematică din Piața Victoriei continuă să pulseze ca un far cultural incontestabil al României și al Europei, găzduind stagiuni grandioase de operă, balet și operetă. Spatele fațadei sale monumentale și al celebrului arc de triumf converg o trupă de elită și o echipă artistică dedicată, care transformă fiecare spectacol într-o experiență magică pentru generații întregi de spectatori. De la acordurile simfonice spectaculoase până la festivalurile internaționale găzduite anual, Teatrul și Opera rămân sanctuarul viu unde istoria și viitorul se împletesc în armonie perfectă.",
+      media:  { type: "image", src: "opera/2026.jpg" },
+      toPrev: "opera/2026-1989.mp4" }
+  ]
+};
+
+/* =====================================================================
+   De aici in jos e logica paginii; in mod normal nu trebuie modificata.
+   ===================================================================== */
+document.documentElement.style.setProperty("--fit", CONFIG.FIT);
+// Referinte catre elementele paginii si starea aplicatiei
+const eras = CONFIG.ERAS;
+const zoomer = document.getElementById("zoomer");
+const track = document.getElementById("track");
+const caption = document.getElementById("caption");
+const root = document.documentElement;
+const START = CONFIG.START_INDEX < 0
+  ? Math.max(0, eras.length + CONFIG.START_INDEX)
+  : Math.min(CONFIG.START_INDEX, eras.length - 1);
+// current = epoca afisata acum; target = epoca spre care mergem (poate fi mai departe, daca se fac mai multi pasi);
+// busy = true cat timp ruleaza un video de tranzitie
+let current = START, target = START, busy = false;
+
+/* ---------- Medii de poziționare (stau pe ecran la fiecare epocă) ---------- */
+// Creeaza stratul (imagine sau video in bucla) al unei epoci. label = textul afisat daca fisierul lipseste.
+function mkMedia(item, cls, label) {
+  const layer = document.createElement("div");
+  layer.className = "layer " + cls;
+  layer.dataset.label = label;
+  let el;
+  if (item.type === "video") {
+    el = document.createElement("video");
+    Object.assign(el, { src: item.src, muted: true, loop: true, playsInline: true, preload: "auto" });
+  } else { el = document.createElement("img"); el.src = item.src; el.alt = ""; }
+  el.addEventListener("error", () => layer.classList.add("missing"));
+  layer.appendChild(el);
+  return layer;
+}
+// holds[i] = stratul epocii i (toate sunt create de la inceput, doar unul e vizibil)
+const holds = eras.map(e => { const l = mkMedia(e.media, "hold", e.media.src); zoomer.appendChild(l); return l; });
+
+/* ---------- Videouri de tranziție (încărcate din timp) ---------- */
+// vids["de>la"] = videoul de tranzitie intre doua epoci, ex. vids["2>3"]
+const vids = {};
+function mkTransition(from, to, src) {
+  const layer = document.createElement("div");
+  layer.className = "layer trans";
+  const v = document.createElement("video");
+  Object.assign(v, { src, muted: true, playsInline: true, preload: "none" });
+  v.addEventListener("error", () => { v.dataset.broken = "1"; });
+  layer.appendChild(v);
+  zoomer.appendChild(layer);
+  vids[from + ">" + to] = { layer, v };
+}
+// Cream tranzitiile din CONFIG: inainte (toNext) si inapoi (toPrev)
+eras.forEach((e, i) => {
+  if (e.toNext && i < eras.length - 1) mkTransition(i, i + 1, e.toNext);
+  if (e.toPrev && i > 0)               mkTransition(i, i - 1, e.toPrev);
+});
+function preloadAround(i) {   // încarcă doar tranzițiile vecine, ca să nu se aglomereze memoria
+  [i + ">" + (i + 1), i + ">" + (i - 1)].forEach(k => {
+    const t = vids[k]; if (t && t.v.preload !== "auto") { t.v.preload = "auto"; t.v.load(); }
+  });
+}
+
+/* ---------- Timeline ---------- */
+// Un buton pentru fiecare epoca; click pe el sare direct la acea epoca
+track.style.setProperty("--n", eras.length);
+track.innerHTML = '<div class="line"><div class="fill" id="fill"></div></div>';
+const fill = document.getElementById("fill");
+const ticks = eras.map((e, i) => {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "tick";
+  b.innerHTML = '<span class="dot"></span><span class="year"></span>';
+  b.querySelector(".year").textContent = e.year;
+  b.addEventListener("click", () => requestTarget(i));
+  track.appendChild(b);
+  return b;
+});
+// Marcheaza epoca curenta (active), pe cele trecute (passed) si umple linia pana la ea
+function paintTimeline(idx) {
+  ticks.forEach((t, i) => {
+    t.classList.toggle("active", i === idx);
+    t.classList.toggle("passed", i < idx);
+    t.setAttribute("aria-current", i === idx ? "step" : "false");
+  });
+  fill.style.transform = `scaleX(${eras.length > 1 ? idx / (eras.length - 1) : 0})`;
+}
+// Scrie anul, titlul si textul epocii in zona de text (nu o afiseaza; asta face setCaption)
+function paintCaption(idx) {
+  caption.querySelector(".cap-year").textContent = eras[idx].year;
+  caption.querySelector("h2").textContent = eras[idx].title;
+  caption.querySelector("p").textContent = eras[idx].text;
+}
+// Afiseaza imaginea/videoul epocii idx si le ascunde pe celelalte; videourile in bucla ruleaza doar cat sunt vizibile
+function showHold(idx, instant = false) {
+  // instant = schimbare fără fade (evită "pâlpâirea": altfel imaginea veche iese și cea nouă intră în același timp și se vede negru printre ele)
+  holds.forEach((h, i) => {
+    if (instant) h.style.transition = "none";
+    h.classList.toggle("show", i === idx);
+    const v = h.querySelector("video");
+    if (v) { if (i === idx) v.play().catch(() => {}); else v.pause(); }
+  });
+  if (instant) { void zoomer.offsetWidth; holds.forEach(h => h.style.transition = ""); }
+}
+
+/* ---------- Motor de tranziție ---------- */
+// Face UN pas spre target (cu video de tranzitie); la final se apeleaza singura pana ajunge la target
+function step() {
+  if (busy || current === target) return;
+  const from = current, to = from + Math.sign(target - from);   // to = epoca vecina, pe directia lui target
+  const t = vids[from + ">" + to];
+  setZoom(false);
+  busy = true;
+  caption.classList.add("hidden");
+
+  // finish = ce se intampla cand tranzitia s-a terminat
+  const finish = () => {
+    current = to;
+    showHold(to, true);                   // epoca nouă apare INSTANT dedesubt…
+    paintCaption(to);
+    if (t) {                                                    // …apoi videoul se estompează
+      t.layer.classList.remove("show"); t.v.pause();
+      // revenim la început abia după estompare, ca să nu se vadă ultimul cadru la următoarea redare
+      setTimeout(() => { if (!t.layer.classList.contains("show")) t.v.currentTime = 0; }, 700);
+    }
+    busy = false;
+    preloadAround(to);
+    step();                               // continuă dacă mai e de parcurs
+  };
+
+  if (!t || t.v.dataset.broken) {         // fără videoclip: schimbare simplă cu fade
+    paintTimeline(to);
+    root.style.setProperty("--tl-ms", "600ms");
+    return setTimeout(finish, 600);
+  }
+
+  // Tranzitie cu video: `end` poate fi chemata de mai multe ori (ended / error / timeout), dar ruleaza o singura data
+  let done = false;
+  const end = () => { if (!done) { done = true; clearTimeout(guard); finish(); } };
+  t.v.currentTime = 0;
+  t.layer.classList.add("show");
+  const startPlay = () => {
+    const ms = (isFinite(t.v.duration) ? t.v.duration : 6) * 1000;
+    root.style.setProperty("--tl-ms", ms + "ms");
+    paintTimeline(to);                    // linia timeline-ului curge pe durata videoului
+    t.v.play().catch(end);
+  };
+  t.v.addEventListener("ended", end, { once: true });
+  t.v.addEventListener("error", end, { once: true });
+  const guard = setTimeout(end, 15000);   // plasă de siguranță dacă videoul se blochează
+  if (t.v.readyState >= 1) startPlay();
+  else { t.v.addEventListener("loadedmetadata", startPlay, { once: true }); t.v.load(); }
+}
+// Seteaza epoca dorita (limitata la capetele timeline-ului) si porneste deplasarea
+function requestTarget(i) {
+  target = Math.max(0, Math.min(eras.length - 1, i));
+  step();
+}
+
+/* ---------- Text (afișat cu swipe jos, ascuns cu swipe sus) ---------- */
+function setCaption(on) {
+  if (on && busy) return;                 // nu se arată în timpul tranziției
+  caption.classList.toggle("hidden", !on);
+}
+
+/* ---------- Zoom ---------- */
+// Zoom simplu: 1.5x sau normal (valoarea e citita de CSS prin --zoom)
+function setZoom(on) { root.style.setProperty("--zoom", on ? 1.5 : 1); }
+
+/* ---------- Acțiuni WebSocket ---------- */
+// Fiecare actiune primita de la backend (gesture_server.py) este legata de o functie
+const ACTIONS = {
+  swipe_right: () => requestTarget(target + 1),   // înainte cronologic
+  swipe_left:  () => requestTarget(target - 1),   // înapoi cronologic
+  swipe_down: () => setCaption(true),             // arată textul epocii curente
+  swipe_up:   () => setCaption(false),            // ascunde textul
+  zoom_in:  () => { if (!busy) setZoom(true); },
+  zoom_out: () => setZoom(false)
+};
+// Mesajul primit e JSON, de ex. {"action": "swipe_right", ...}; actiunile necunoscute se ignora
+function handleMessage(raw) {
+  try { const fn = ACTIONS[JSON.parse(raw).action]; if (fn) fn(); }
+  catch (e) { console.warn("Mesaj invalid:", raw); }
+}
+const dot = document.getElementById("ws-dot");
+// Conectare WebSocket cu reconectare automata (pauza creste de la 1 s pana la max. 10 s)
+let retry = 1000;
+function connectWS() {
+  let ws;
+  try { ws = new WebSocket(CONFIG.WS_URL); } catch (e) { return setTimeout(connectWS, retry); }
+  ws.onopen = () => { dot.classList.add("on"); retry = 1000; };
+  ws.onmessage = ev => handleMessage(ev.data);
+  ws.onclose = () => { dot.classList.remove("on"); setTimeout(connectWS, retry); retry = Math.min(retry * 2, 10000); };
+  ws.onerror = () => ws.close();
+}
+
+/* ---------- Camera MJPEG ---------- */
+const pip = document.getElementById("pip"), pipImg = document.getElementById("pip-img");
+// Adaugam ?t=<timp> ca browserul sa nu refoloseasca o conexiune veche; la eroare reincercam dupa CAMERA_RETRY_MS
+function loadCamera() { pipImg.src = CONFIG.CAMERA_URL + (CONFIG.CAMERA_URL.includes("?") ? "&" : "?") + "t=" + Date.now(); }
+pipImg.addEventListener("load", () => pip.classList.remove("offline"));
+pipImg.addEventListener("error", () => { pip.classList.add("offline"); setTimeout(loadCamera, CONFIG.CAMERA_RETRY_MS); });
+
+/* ---------- Taste pentru test (aceleasi actiuni ca gesturile) ---------- */
+document.addEventListener("keydown", e => {
+  const m = { ArrowRight: "swipe_right", ArrowLeft: "swipe_left", ArrowDown: "swipe_down", ArrowUp: "swipe_up", "+": "zoom_in", "=": "zoom_in", "-": "zoom_out" };
+  if (m[e.key]) ACTIONS[m[e.key]]();
+});
+document.addEventListener("contextmenu", e => e.preventDefault());
+
+/* ---------- Muzică de fundal (buclă) + buton ---------- */
+const musicBtn = document.getElementById("music-btn");
+const music = new Audio(CONFIG.MUSIC_URL);
+music.loop = true;
+music.volume = CONFIG.MUSIC_VOLUME;
+music.preload = "auto";
+let userPaused = false;                   // true dacă ați oprit-o voit din buton
+function paintMusic() {
+  const on = !music.paused;
+  musicBtn.classList.toggle("playing", on);
+  musicBtn.setAttribute("aria-pressed", on);
+  musicBtn.setAttribute("aria-label", on ? "Oprește muzica" : "Pornește muzica");
+}
+function toggleMusic() {
+  if (music.paused) { userPaused = false; music.play().catch(() => {}); }
+  else              { userPaused = true;  music.pause(); }
+}
+music.addEventListener("play", paintMusic);
+music.addEventListener("pause", paintMusic);
+music.addEventListener("error", () => { musicBtn.classList.add("na"); console.warn("Muzica nu s-a putut încărca:", CONFIG.MUSIC_URL); });
+musicBtn.addEventListener("click", toggleMusic);
+document.addEventListener("keydown", e => { if (e.key.toLowerCase() === "m") toggleMusic(); });
+// Browserul poate bloca pornirea automată; atunci muzica pornește la prima atingere/tastă (nu și la butonul în sine)
+["pointerdown", "keydown", "touchstart"].forEach(ev => document.addEventListener(ev, e => {
+  if (e.target.closest && e.target.closest("#music-btn")) return;
+  if (e.type === "keydown" && e.key.toLowerCase() === "m") return;
+  if (music.paused && !userPaused) music.play().catch(() => {});
+}));
+music.play().catch(() => {});             // încercare de pornire automată
+paintMusic();
+
+/* ---------- Înălțimea timeline-ului (pentru poziționarea textului) ---------- */
+const tl = document.getElementById("timeline");
+const syncTl = () => root.style.setProperty("--tl-h", tl.offsetHeight + "px");
+new ResizeObserver(syncTl).observe(tl); syncTl();
+
+/* ---------- Start ---------- */
+fill.style.transition = "none";          // fără animație la prima afișare
+showHold(START); paintCaption(START); paintTimeline(START); preloadAround(START);
+void fill.offsetWidth;                   // forțează aplicarea stării
+fill.style.transition = "";
+loadCamera(); connectWS();
+</script>
+</body>
+</html>
