@@ -1,0 +1,11 @@
+-------------------------------------------------------------
+      Vizunea noastra pentru prototipul creat
+-------------------------------------------------------------
+
+  1.  Proiectul nostru este conceput pentru vizitatorii Timisoarei care vor sa afle despre istoria Timisoarei intr-un mod inedit.
+  2.  De ce are nevoie proiectul nostru: un calculator pentru a rula scriptul de motion detection, un display pentru a afisa pagina web si o       camera web.
+  3. Noi vedem aceast proiect implementat langa diferite monumente istorice ale Timisoarei, acesta putand fi adaptat pentru orice punct de          interes cultural.
+  4. Exemple de locuri unde putem implementa proiectul: - Info Centrul Turistic Timisoara.
+                                                        - Statii de autobuze/tramvaie(Catedrala Metropolitana, Bastion etc.)
+                                                        - In interiorul autobuzelor si tramvaielor.
+                                                        - Intr-o expozitie de arta imersiva
